@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<title>منصة تحليل سلوك المستهلك بالذكاء الاصطناعي - K-Means</title>
+
+<!-- Chart.js للرسم -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<!-- D3.js لرسم شجرة Dendrogram -->
+<script src="https://d3js.org/d3.v7.min.js"></script>
+
+<style>
+body { font-family: Tahoma; background:#eef2f5; margin:0; padding:20px; }
+h2 { color:#0b4f6c; }
+.box {
+  background:white; padding:20px; border-radius:12px;
+  box-shadow:0 0 10px #ccc; max-width:1200px; margin:auto; margin-bottom:25px;
+}
+input, button {
+  padding:8px 12px; border:1px solid #bbb; border-radius:6px;
+}
+button { background:#0b4f6c; color:white; border:none; cursor:pointer; }
+button:hover { background:#08394e; }
+canvas { background:#fff; border:1px solid #ccc; }
+pre { background:#f0f0f0; padding:10px; border-radius:6px; max-height:300px; overflow:auto; }
+table { width:100%; border-collapse:collapse;}
+th,td{border:1px solid #ccc; padding:8px;}
+th{background:#0b4f6c; color:white;}
+</style>
+</head>
+
+<body>
+
+<div class="box">
+<h2>منصة تحليل سلوك المستهلك باستخدام K-Means</h2>
+
+<button onclick="generateSynthetic()">توليد بيانات تجريبية</button>
+<input type="file" id="csvFile" accept=".csv">
+<button onclick="loadCSV()">تحميل ملف CSV وتشغيله</button>
+
+<br><br>
+<label>عدد المجموعات (K):</label>
+<input type="number" id="kInput" value="3" min="2" max="6">
+<button onclick="runKMeans()">تشغيل K-Means</button>
+</div>
+
+<div class="box">
+<h2>Dashboard النتائج</h2>
+<div id="resultsSummary"></div>
+<br>
+<h3>Cluster Plot</h3>
+<canvas id="clusterChart" width="600" height="350"></canvas>
+
+<h3>شجرة العلاقات (Hierarchical Dendrogram)</h3>
+<div id="dendrogram"></div>
+
+<h3>تحليل السلوك</h3>
+<pre id="behaviorAnalysis"></pre>
+
+<h3>جزء من البيانات</h3>
+<pre id="sampleData"></pre>
+</div>
+
+<script>
+// قراءة CSV
+function loadCSV() {
+  const file = document.getElementById("csvFile").files[0];
+  if (!file) return alert("اختر ملف CSV أولاً!");
+
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    const lines = e.target.result.split("\n").map(a => a.trim());
+    const headers = lines[0].split(",");
+    rawData = [];
+
+    for (let i=1; i<lines.length; i++){
+      if (!lines[i]) continue;
+      const vals = lines[i].split(",");
+      rawData.push({
+        Age: parseFloat(vals[1]),
+        Income: parseFloat(vals[2]),
+        Visits: parseFloat(vals[3]),
+        Cart: parseFloat(vals[4]),
+        Clicks: parseFloat(vals[5])
+      });
+    }
+    alert("تم تحميل البيانات من CSV بنجاح");
+  };
+  reader.readAsText(file);
+}
+
+// بيانات تجريبية
+let rawData = [];
+function generateSynthetic(){
+  rawData = [];
+  for(let i=0;i<60;i++){
+    rawData.push({Age:random(18,28), Income:random(25000,45000), Visits:random(6,12), Cart:random(1000,5000), Clicks:random(12,20)});
+    rawData.push({Age:random(30,45), Income:random(50000,80000), Visits:random(3,7), Cart:random(4000,12000), Clicks:random(7,15)});
+    rawData.push({Age:random(50,65), Income:random(90000,130000), Visits:random(1,4), Cart:random(8000,25000), Clicks:random(3,7)});
+  }
+  document.getElementById("sampleData").textContent = JSON.stringify(rawData.slice(0,10),null,2);
+}
+
+function random(a,b){return Math.floor(Math.random()*(b-a+1))+a;}
+
+// مسافة
+function dist(a,b){ return Math.sqrt((a.Age-b.Age)**2 + (a.Income-b.Income)**2); }
+
+// K-Means
+let assignments = [];
+let centers = [];
+
+function runKMeans(){
+  if(rawData.length===0) return alert("لم يتم تحميل البيانات!");
+
+  let k = parseInt(document.getElementById("kInput").value);
+  centers = [];
+  assignments = new Array(rawData.length).fill(0);
+
+  centers.push(rawData[0], rawData[40], rawData[80]); // مراكز أولية
+
+  for(let iter=0; iter<10; iter++){
+    // الإسناد
+    for(let i=0;i<rawData.length;i++){
+      let d0 = dist(rawData[i], centers[0]);
+      let d1 = dist(rawData[i], centers[1]);
+      let d2 = dist(rawData[i], centers[2]);
+      assignments[i] = [d0,d1,d2].indexOf(Math.min(d0,d1,d2));
+    }
+
+    // تحديث
+    let sum = Array.from({length:3},()=>({Age:0,Income:0,count:0}));
+    for(let i=0;i<rawData.length;i++){
+      let c = assignments[i];
+      sum[c].Age+=rawData[i].Age;
+      sum[c].Income+=rawData[i].Income;
+      sum[c].count++;
+    }
+    for(let c=0;c<3;c++){
+      centers[c]={Age:sum[c].Age/sum[c].count, Income:sum[c].Income/sum[c].count};
+    }
+  }
+
+  showDashboard();
+  drawClusterPlot();
+  drawDendrogram();
+  analyzeBehavior();
+}
+
+// Dashboard
+function showDashboard(){
+  let out = "<table><tr><th>المجموعة</th><th>عدد العملاء</th><th>متوسط العمر</th><th>متوسط الدخل</th></tr>";
+  for(let c=0;c<3;c++){
+    let sel = rawData.filter((x,i)=>assignments[i]===c);
+    let avgAge = sel.reduce((a,b)=>a+b.Age,0)/sel.length;
+    let avgInc = sel.reduce((a,b)=>a+b.Income,0)/sel.length;
+    out += `<tr><td>${c}</td><td>${sel.length}</td><td>${avgAge.toFixed(1)}</td><td>${avgInc.toFixed(0)}</td></tr>`;
+  }
+  out+="</table>";
+  document.getElementById("resultsSummary").innerHTML = out;
+}
+
+// رسم Clusters
+function drawClusterPlot(){
+  const ctx = document.getElementById("clusterChart").getContext("2d");
+  let data0 = rawData.filter((x,i)=>assignments[i]===0).map(x=>({x:x.Age,y:x.Income}));
+  let data1 = rawData.filter((x,i)=>assignments[i]===1).map(x=>({x:x.Age,y:x.Income}));
+  let data2 = rawData.filter((x,i)=>assignments[i]===2).map(x=>({x:x.Age,y:x.Income}));
+
+  new Chart(ctx,{
+    type:"scatter",
+    data:{
+      datasets:[
+        {label:"Cluster 0",data:data0, backgroundColor:"red"},
+        {label:"Cluster 1",data:data1, backgroundColor:"blue"},
+        {label:"Cluster 2",data:data2, backgroundColor:"green"}
+      ]
+    },
+    options:{responsive:false}
+  });
+}
+
+// شجرة Hierarchical
+function drawDendrogram(){
+  document.getElementById("dendrogram").innerHTML="";
+  let div = d3.select("#dendrogram");
+  div.append("p").text("شجرة بسيطة (محاكاة)");
+
+  const data = {name:"العملاء", children:[
+    {name:"Cluster 0"},
+    {name:"Cluster 1"},
+    {name:"Cluster 2"}
+  ]};
+
+  const width=400, dx=20, dy=100;
+  const tree = d3.tree().nodeSize([dx,dy]);
+  const root = d3.hierarchy(data);
+  tree(root);
+
+  const svg = div.append("svg")
+    .attr("width",500).attr("height",200)
+    .attr("style","font:12px sans-serif;");
+
+  const g = svg.append("g")
+    .attr("transform","translate(40,40)");
+
+  g.selectAll("path")
+    .data(root.links())
+    .enter().append("path")
+    .attr("d", d3.linkHorizontal().x(d=>d.y).y(d=>d.x))
+    .attr("stroke","#555").attr("fill","none");
+
+  g.selectAll("circle")
+    .data(root.descendants())
+    .enter().append("circle")
+    .attr("cx",d=>d.y).attr("cy",d=>d.x).attr("r",5)
+    .attr("fill","steelblue");
+
+  g.selectAll("text")
+    .data(root.descendants())
+    .enter().append("text")
+    .attr("x",d=>d.y+8).attr("y",d=>d.x+5)
+    .text(d=>d.data.name);
+}
+
+// تحليل السلوك
+function analyzeBehavior(){
+  let out = "";
+  for(let c=0;c<3;c++){
+    let sel = rawData.filter((x,i)=>assignments[i]===c);
+    let age = sel.reduce((a,b)=>a+b.Age,0)/sel.length;
+    let inc = sel.reduce((a,b)=>a+b.Income,0)/sel.length;
+
+    out += `المجموعة ${c}:\n`;
+    if(age<30) out+=" - شباب، حسّاسون للسعر، نشاط عالي في الزيارات.\n";
+    else if(age<50) out+=" - فئة عائلات، مشتريات متوسطة.\n";
+    else out+=" - كبار سن، دخل مرتفع، مشتريات أكبر.\n";
+
+    if(inc>90000) out+=" - يمكن استهدافهم بعروض Premium.\n";
+    out+="\n";
+  }
+  document.getElementById("behaviorAnalysis").textContent = out;
+}
+
+</script>
+</body>
+</html>
